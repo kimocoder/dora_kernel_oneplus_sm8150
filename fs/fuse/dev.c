@@ -542,11 +542,11 @@ static void request_wait_answer(struct fuse_conn *fc, struct fuse_req *req)
 
 	/*
 	 * Either request is already in userspace, or it was forced.
-	 * Wait it out.
+	 * Wait half of freeze_timeout_msecs to avoid getting stuck.
 	 */
 	while (!test_bit(FR_FINISHED, &req->flags))
-		wait_event_freezable(req->waitq,
-				test_bit(FR_FINISHED, &req->flags));
+		wait_event_freezable_timeout(req->waitq,
+			test_bit(FR_FINISHED, &req->flags), freeze_timeout_msecs / 2);
 }
 
 static void __fuse_request_send(struct fuse_conn *fc, struct fuse_req *req)
@@ -1068,7 +1068,17 @@ static int fuse_copy_page(struct fuse_copy_state *cs, struct page **pagep,
 
 	while (count) {
 		if (cs->write && cs->pipebufs && page) {
-			return fuse_ref_page(cs, page, offset, count);
+			/*
+			 * Can't control lifetime of pipe buffers, so always
+			 * copy user pages.
+			 */
+			if (cs->req->user_pages) {
+				err = fuse_copy_fill(cs);
+				if (err)
+					return err;
+			} else {
+				return fuse_ref_page(cs, page, offset, count);
+			}
 		} else if (!cs->len) {
 			if (cs->move_pages && page &&
 			    offset == 0 && count == PAGE_SIZE) {

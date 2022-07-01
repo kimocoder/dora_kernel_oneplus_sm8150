@@ -511,7 +511,7 @@ static struct rq *dl_task_offline_migration(struct rq *rq, struct task_struct *p
 		 * If we cannot preempt any rq, fall back to pick any
 		 * online cpu.
 		 */
-		cpu = cpumask_any_and(cpu_active_mask, &p->cpus_allowed);
+		cpu = cpumask_any_and(cpu_active_mask, p->cpus_ptr);
 		if (cpu >= nr_cpu_ids) {
 			/*
 			 * Fail to find any suitable cpu.
@@ -1437,12 +1437,15 @@ static void enqueue_task_dl(struct rq *rq, struct task_struct *p, int flags)
 		pi_se = &pi_task->dl;
 	} else if (!dl_prio(p->normal_prio)) {
 		/*
-		 * Special case in which we have a !SCHED_DEADLINE task
-		 * that is going to be deboosted, but exceeds its
-		 * runtime while doing so. No point in replenishing
-		 * it, as it's going to return back to its original
-		 * scheduling class after this.
+		 * Special case in which we have a !SCHED_DEADLINE task that is going
+		 * to be deboosted, but exceeds its runtime while doing so. No point in
+		 * replenishing it, as it's going to return back to its original
+		 * scheduling class after this. If it has been throttled, we need to
+		 * clear the flag, otherwise the task may wake up as throttled after
+		 * being boosted again with no means to replenish the runtime and clear
+		 * the throttle.
 		 */
+		p->dl.dl_throttled = 0;
 		BUG_ON(!p->dl.dl_boosted || flags != ENQUEUE_REPLENISH);
 		return;
 	}
@@ -1795,7 +1798,7 @@ static void set_curr_task_dl(struct rq *rq)
 static int pick_dl_task(struct rq *rq, struct task_struct *p, int cpu)
 {
 	if (!task_running(rq, p) &&
-	    cpumask_test_cpu(cpu, &p->cpus_allowed))
+	    cpumask_test_cpu(cpu, p->cpus_ptr))
 		return 1;
 	return 0;
 }
@@ -1945,7 +1948,7 @@ static struct rq *find_lock_later_rq(struct task_struct *task, struct rq *rq)
 		/* Retry if something changed. */
 		if (double_lock_balance(rq, later_rq)) {
 			if (unlikely(task_rq(task) != rq ||
-				     !cpumask_test_cpu(later_rq->cpu, &task->cpus_allowed) ||
+				     !cpumask_test_cpu(later_rq->cpu, task->cpus_ptr) ||
 				     task_running(rq, task) ||
 				     !dl_task(task) ||
 				     !task_on_rq_queued(task))) {
